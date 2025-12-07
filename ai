@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>AI Чат с рабочими кнопками и голосом</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; font-family:'Segoe UI',sans-serif; }
+body { display:flex; height:100vh; overflow:hidden; background:#e0e0e0; color:#000; }
+.sidebar { width:280px; background:#f0f0f0; display:flex; flex-direction:column; overflow-y:auto; border-right:1px solid #ccc; z-index:1; }
+.sidebar h3 { padding:15px; text-align:center; border-bottom:1px solid #ccc; font-size:16px; color:#555; }
+.topic { padding:10px 12px; border-bottom:1px solid #ddd; cursor:pointer; display:flex; align-items:center; gap:8px; border-radius:12px; transition:0.2s; background:#fff; margin:5px; }
+.topic:hover { background:#e0e0e0; }
+.topic-mini { width:30px; height:30px; background:#4e8cff; border-radius:50%; flex-shrink:0; display:flex; justify-content:center; align-items:center; color:#fff; font-size:14px; }
+.main { flex:1; display:flex; flex-direction:column; position:relative; background:#e0e0e0; z-index:0; }
+.messages { flex:1; overflow-y:auto; padding:20px; display:flex; flex-direction:column; gap:12px; position:relative; }
+.placeholder { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); font-size:28px; color: rgba(0,0,0,0.3); text-align:center; pointer-events:none; }
+.msg { max-width:75%; padding:14px 18px; border-radius:20px; font-size:16px; word-wrap:break-word; white-space:pre-wrap; box-shadow:0 3px 6px rgba(0,0,0,0.1); opacity:0; transform:translateY(20px); animation:fadeIn 0.4s forwards; cursor:pointer; }
+.user { background:#4e8cff; color:white; align-self:flex-end; border-bottom-right-radius:4px; }
+.bot { background:#d3d3d3; color:#000; align-self:flex-start; border-bottom-left-radius:4px; }
+@keyframes fadeIn { to { opacity:1; transform:translateY(0); } }
+.controls { display:flex; padding:12px; gap:10px; background:#f5f5f5; border-top:1px solid #ccc; z-index:1; }
+button { padding:0 15px; height:40px; border-radius:20px; border:none; background:#fff; color:#000; font-size:16px; cursor:pointer; box-shadow:0 2px 5px rgba(0,0,0,0.2); transition:0.2s; }
+button:hover { background:#e5e5e5; }
+button:active { transform:scale(0.95); box-shadow:0 1px 3px rgba(0,0,0,0.2); }
+input[type="text"] { flex:1; padding:10px 14px; border-radius:20px; border:none; font-size:16px; outline:none; background:#fff; }
+input[type="text"]::placeholder { color:#888; }
+.settings { position:absolute; top:10px; right:10px; background:#fff; padding:15px; border-radius:12px; box-shadow:0 3px 6px rgba(0,0,0,0.2); z-index:100; display:none; flex-direction:column; gap:10px; width:220px; }
+.settings label { font-size:14px; color:#000; display:flex; justify-content:space-between; align-items:center; }
+</style>
+</head>
+<body>
+
+<div class="sidebar" id="sidebar">
+  <h3>Темы / Сохранённые чаты</h3>
+  <div id="topics"></div>
+  <button id="addTopicBtn">➕ Добавить тему</button>
+  <button id="settingsBtn">⚙️ Настройки</button>
+</div>
+
+<div class="main" id="main">
+  <div class="messages" id="messages">
+    <div class="placeholder" id="placeholder">Чем могу помочь?</div>
+  </div>
+  <div class="controls">
+    <input type="text" id="input" placeholder="Напиши сообщение...">
+    <button id="sendBtn">➤</button>
+  </div>
+</div>
+
+<div class="settings" id="settings">
+  <label>Тема:
+    <select id="themeSelect">
+      <option value="light">Светлая</option>
+      <option value="dark">Тёмная</option>
+    </select>
+  </label>
+  <label>Настроение бота:
+    <select id="moodSelect">
+      <option value="friendly">Дружелюбный</option>
+      <option value="serious">Серьёзный</option>
+      <option value="funny">Шутник</option>
+    </select>
+  </label>
+  <label>Голосовой ассистент:
+    <input type="checkbox" id="voiceAssistantToggle">
+  </label>
+</div><script>
+const API_KEY="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";
+const messages=document.getElementById("messages");
+const input=document.getElementById("input");
+const placeholder=document.getElementById("placeholder");
+const topicsDiv=document.getElementById("topics");
+const settingsPanel=document.getElementById("settings");
+const addTopicBtn=document.getElementById("addTopicBtn");
+const settingsBtn=document.getElementById("settingsBtn");
+const sendBtn=document.getElementById("sendBtn");
+
+let chatHistory=[];
+let topicsHistory=[];
+
+// Загрузка истории
+if(localStorage.getItem('chatHistory')) chatHistory=JSON.parse(localStorage.getItem('chatHistory'));
+if(localStorage.getItem('topicsHistory')) topicsHistory=JSON.parse(localStorage.getItem('topicsHistory'));
+topicsHistory.forEach(t=>addTopic(t));
+chatHistory.forEach(m=>addMsg(m.content,m.role));
+
+// Placeholder
+function updatePlaceholder(){ placeholder.style.display=(input.value.trim()==='' && messages.children.length<=1)?'block':'none'; }
+input.addEventListener('input',updatePlaceholder);
+
+// Добавление сообщений
+function addMsg(text,type){
+  const div=document.createElement("div");
+  div.className="msg "+type;
+  div.textContent=text;
+  messages.appendChild(div);
+  messages.scrollTop=messages.scrollHeight;
+  div.onmousedown=()=>{
+    if(document.getElementById('voiceAssistantToggle').checked){
+      const utter=new SpeechSynthesisUtterance(text);
+      utter.lang='ru-RU';
+      utter.voice=speechSynthesis.getVoices().find(v=>v.name.includes('Male'))||speechSynthesis.getVoices()[0];
+      speechSynthesis.speak(utter);
+    }
+  };
+}
+
+// Добавление темы
+function addTopic(text){
+  if(!text) return;
+  const div=document.createElement("div");
+  div.className="topic";
+  const mini=document.createElement("div"); mini.className="topic-mini"; mini.textContent=topicsDiv.children.length+1; div.appendChild(mini);
+  const span=document.createElement("span"); span.textContent=text.length>25?text.slice(0,25)+'...':text; div.appendChild(span);
+  div.onclick=()=>alert("Тема:\n"+text);
+  topicsDiv.appendChild(div);
+  if(!topicsHistory.includes(text)){ topicsHistory.push(text); localStorage.setItem('topicsHistory', JSON.stringify(topicsHistory)); }
+}
+
+// Добавление темы вручную
+addTopicBtn.onclick=()=>{
+  const t=prompt("Название темы/заметки:");
+  if(t) addTopic(t);
+}
+
+// Настройки
+settingsBtn.onclick=()=>{ settingsPanel.style.display=(settingsPanel.style.display==='flex')?'none':'flex'; }
+
+// Смена темы
+document.getElementById('themeSelect').onchange=()=>{
+  const t=document.getElementById('themeSelect').value;
+  if(t==='light'){document.body.style.background='#f0f0f0'; messages.style.background='#fff';}
+  else {document.body.style.background='#e0e0e0'; messages.style.background='#d3d3d3';}
+}
+
+// Отправка сообщения
+sendBtn.onclick=send;
+input.addEventListener('keydown',e=>{ if(e.key==='Enter') send(); });
+
+async function send(){
+  const text=input.value.trim();
+  if(!text) return;
+  addMsg(text,'user');
+  chatHistory.push({role:'user', content:text});
+  localStorage.setItem('chatHistory',JSON.stringify(chatHistory));
+  input.value='';
+  updatePlaceholder();
+  addMsg('...', 'bot');
+  const botDiv=messages.lastChild;
+
+  try{
+    const mood=document.getElementById('moodSelect').value;
+    const res=await fetch('https://api.openai.com/v1/chat/completions',{
+      method:'POST',
+      headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer '+API_KEY },
+      body: JSON.stringify({
+        model:'gpt-4o-mini',
+        messages:[{role:'system',content:Ты AI помощник. Твой стиль: ${mood}. Иногда вставляй смайлики.}, ...chatHistory]
+      })
+    });
+    const data=await res.json();
+    const answer=data.choices[0].message.content;
+    botDiv.textContent=answer;
+    chatHistory.push({role:'assistant', content:answer});
+    localStorage.setItem('chatHistory',JSON.stringify(chatHistory));// Голосовой ассистент
+    if(document.getElementById('voiceAssistantToggle').checked){
+      const utter=new SpeechSynthesisUtterance(answer);
+      utter.lang='ru-RU';
+      utter.voice=speechSynthesis.getVoices().find(v=>v.name.includes('Male'))||speechSynthesis.getVoices()[0];
+      speechSynthesis.speak(utter);
+    }
+  }catch(err){ botDiv.textContent='Ошибка запроса'; console.error(err); }
+}
+</script>
+</body>
+</html>
